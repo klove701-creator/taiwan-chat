@@ -3,14 +3,7 @@ export const handler = async (event) => {
     return { statusCode: 405, body: "Method Not Allowed" };
   }
 
-  // 비밀번호 체크
-  const { password, ...body } = JSON.parse(event.body || "{}");
-  if (password !== process.env.APP_PASSWORD) {
-    return {
-      statusCode: 401,
-      body: JSON.stringify({ error: "비밀번호가 틀렸어요" }),
-    };
-  }
+  const body = JSON.parse(event.body || "{}");
 
   try {
     const response = await fetch("https://api.anthropic.com/v1/messages", {

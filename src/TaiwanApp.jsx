@@ -1,11 +1,10 @@
 import { useState, useRef, useEffect } from "react";
 
-// API 호출 헬퍼 - 비밀번호를 항상 포함해서 전송
-async function callAPI(password, body) {
+async function callAPI(body) {
   const res = await fetch("/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ password, ...body }),
+    body: JSON.stringify(body),
   });
   return res.json();
 }
@@ -488,8 +487,7 @@ function FlashCardInner({ card, accentColor, onResult }) {
 // ────────────────────────────────────────────────
 // 대화 모드
 // ────────────────────────────────────────────────
-function ChatMode({ password }) {
-  const [msgs, setMsgs] = useState([{role:"assistant",raw:INITIAL_RAW,id:0}]);
+function ChatMode({ msgs, setMsgs }) {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [showHints, setShowHints] = useState(false);
@@ -504,8 +502,8 @@ function ChatMode({ password }) {
     const next = [...msgs,userMsg];
     setMsgs(next); setInput(""); setLoading(true); setShowHints(false);
     try {
-      const data = await callAPI(password, {
-        model:"claude-sonnet-4-20250514", max_tokens:1200,
+      const data = await callAPI({
+        model:"claude-haiku-4-5-20251001", max_tokens:1200,
         system:SYSTEM_PROMPT,
         messages:next.map(m=>({role:m.role,content:m.raw})),
       });
@@ -593,6 +591,7 @@ function ChatMode({ password }) {
           <input value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&send()} placeholder="한국어, 번체, 콩글리쉬 다 OK!" disabled={loading}
             style={{flex:1,border:"1.5px solid #ffe0cc",borderRadius:12,padding:"11px 14px",fontSize:15,outline:"none",fontFamily:"'Noto Sans KR',sans-serif",background:"#fffaf8"}}/>
           <button onClick={()=>send()} disabled={loading||!input.trim()} style={{background:loading||!input.trim()?"#ffd6c0":"linear-gradient(135deg,#d4380d,#ff6b35)",border:"none",borderRadius:12,width:46,height:46,cursor:loading||!input.trim()?"not-allowed":"pointer",fontSize:18,boxShadow:loading||!input.trim()?"none":"0 4px 12px rgba(212,56,13,0.3)"}}>➤</button>
+          <button onClick={()=>setMsgs([{role:"assistant",raw:INITIAL_RAW,id:0}])} title="대화 초기화" style={{background:"#f5f5f5",border:"none",borderRadius:12,width:46,height:46,cursor:"pointer",fontSize:18}}>🔄</button>
         </div>
         <button onClick={()=>setShowHints(v=>!v)} style={{background:showHints?"#fff5f0":"transparent",border:"1.5px dashed #ffc499",borderRadius:10,padding:"7px",cursor:"pointer",fontSize:13,color:"#d4380d",fontFamily:"'Noto Sans KR',sans-serif",fontWeight:700}}>
           {showHints?"💡 힌트 숨기기":"💡 힌트 보기"}
@@ -623,9 +622,8 @@ TR_NOTE: [추가 설명. 문화적 맥락, 비슷한 표현, 주의사항 등 �
 - WORDS는 의미 단위로 최대한 잘게 분해
 - TR_NOTE는 진짜 유용한 정보가 있을 때만`;
 
-function TranslateMode({ password }) {
+function TranslateMode({ results, setResults }) {
   const [input, setInput] = useState("");
-  const [results, setResults] = useState([]); // [{input, tr}]
   const [loading, setLoading] = useState(false);
 
   const parseTranslate = (raw) => {
@@ -646,8 +644,8 @@ function TranslateMode({ password }) {
     if (!t || loading) return;
     setLoading(true);
     try {
-      const data = await callAPI(password, {
-        model: "claude-sonnet-4-20250514",
+      const data = await callAPI({
+        model: "claude-haiku-4-5-20251001",
         max_tokens: 800,
         system: TRANSLATE_PROMPT,
         messages: [{ role: "user", content: t }],
@@ -802,8 +800,10 @@ function TranslateMode({ password }) {
 // ────────────────────────────────────────────────
 // 메인 앱
 // ────────────────────────────────────────────────
-export default function TaiwanApp({ password, onLogout }) {
+export default function TaiwanApp() {
   const [tab, setTab] = useState("chat");
+  const [msgs, setMsgs] = useState([{role:"assistant",raw:INITIAL_RAW,id:0}]);
+  const [translateResults, setTranslateResults] = useState([]);
 
   const tabs = [
     { id:"chat",      label:"💬 대화" },
@@ -822,12 +822,6 @@ export default function TaiwanApp({ password, onLogout }) {
             <div style={{fontSize:20,fontWeight:800}}>Taiwan 중국어 연습</div>
             <div style={{fontSize:11,opacity:0.7,marginTop:3}}>繁體中文 · 식당 상황</div>
           </div>
-          <button onClick={onLogout} style={{
-            background:"rgba(255,255,255,0.2)", border:"none",
-            borderRadius:10, padding:"6px 12px",
-            color:"white", fontSize:12, cursor:"pointer", fontWeight:600,
-            fontFamily:"'Noto Sans KR',sans-serif",
-          }}>로그아웃</button>
         </div>
       </div>
 
@@ -848,9 +842,9 @@ export default function TaiwanApp({ password, onLogout }) {
 
       {/* 탭 콘텐츠 */}
       <div style={{width:"100%",maxWidth:560}}>
-        {tab==="chat"      && <ChatMode password={password}/>}
-        {tab==="cards"     && <FlashCardMode/>}
-        {tab==="translate" && <TranslateMode password={password}/>}
+        <div style={{display: tab==="chat" ? "block" : "none"}}><ChatMode msgs={msgs} setMsgs={setMsgs}/></div>
+        <div style={{display: tab==="cards" ? "block" : "none"}}><FlashCardMode/></div>
+        <div style={{display: tab==="translate" ? "block" : "none"}}><TranslateMode results={translateResults} setResults={setTranslateResults}/></div>
       </div>
 
       <style>{`
