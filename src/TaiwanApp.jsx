@@ -12,7 +12,8 @@ async function callAPI(body) {
 // ────────────────────────────────────────────────
 // 데이터
 // ────────────────────────────────────────────────
-const SYSTEM_PROMPT = `你是一位熱情的台灣餐廳服務員，名字叫小美。你正在幫助韓國學習者練習台灣中文（繁體字）餐廳對話。
+function makeSystemPrompt(scenario) {
+  return `你是一位熱情的台灣${scenario} 상황의 직원 또는 현지인，名字叫小美。你正在幫助韓國學習者練習台灣中文（繁體字）對話。현재 상황: ${scenario}
 
 【응답 형식 - 반드시 아래 구조를 정확히 지켜줘】
 
@@ -37,13 +38,58 @@ DETECT: [어떤 말인지 한국어로]
 
 오류 있을 때만: CORRECT: [교정]
 
-규칙: 대만식 번체, 쉽고 짧은 문장, WORDS는 의미단위로 분해, 처음은 손님이 들어온 상황`;
+【콩글리쉬 인식 규칙 - 매우 중요】
+콩글리쉬는 대만 중국어 발음을 한글로 표기한 것. 사용자가 콩글리쉬로 입력하면 아래 대응표를 최우선으로 참조해서 인식해.
 
-const INITIAL_RAW = `REP_ZH: 歡迎光臨！請問幾位？
-REP_PY: Huānyíng guānglín! Qǐngwèn jǐ wèi?
-REP_KONGL: 환잉 광린! 칭원 지 웨이?
-REP_KR: 어서오세요! 몇 분이세요?
-REP_WORDS: 歡迎(환잉)=환영하다|光臨(광린)=왕림하다|請問(칭원)=실례지만|幾(지)=몇|位(웨이)=분(높임)`;
+【콩글리쉬→한자 필수 대응표】
+이 대응표는 입력 인식 AND 콩글리쉬 출력 모두에 사용. 출력할 때도 반드시 아래 표기를 따를 것.
+
+這個(zhège) → 쩌거 (절대 "젤거" 금지)
+那個(nàgè) → 나거
+我(wǒ) → 워
+要(yào) → 야오
+給(gěi) → 게이 (절대 "거이" 금지)
+給我(gěi wǒ) → 게이 워
+我要(wǒ yào) → 워 야오
+我要這個(wǒ yào zhège) → 워 야오 쩌거
+指(zhǐ) → 즈
+哪一個(nǎ yī ge) → 나 이 거
+多少(duōshao) → 뚜어샤오
+錢(qián) → 치엔
+買單(mǎidān) → 마이단
+你好(nǐ hǎo) → 니 하오
+謝謝(xièxie) → 시에시에
+不客氣(bú kèqi) → 부 커치
+對不起(duìbuqǐ) → 뚜이부치
+沒關係(méi guānxi) → 메이 관시
+菜單(càidān) → 차이단
+點菜(diǎn cài) → 디엔 차이
+好吃(hǎo chī) → 하오 츠
+哪裡(nǎlǐ) → 나리
+在哪裡(zài nǎlǐ) → 짜이 나리
+請問(qǐngwèn) → 칭원
+歡迎光臨(huānyíng guānglín) → 환잉 광린
+好(hǎo) → 하오
+你(nǐ) → 니
+想(xiǎng) → 시앙
+看(kàn) → 칸
+啦(la) → 라
+
+핵심 발음 규칙: zh→ㅈ(쩌/주/지), ch→ㅊ(처/추), sh→ㅅ(서/수), g→ㄱ(게/가/고), x→시, q→치, j→지
+
+규칙: 대만식 번체, 쉽고 짧은 문장, WORDS는 의미단위로 분해, 처음은 ${scenario} 상황에 맞는 자연스러운 첫인사`;
+}
+
+const PRESET_SCENARIOS = [
+  { emoji:"🍜", label:"식당" },
+  { emoji:"🏪", label:"편의점" },
+  { emoji:"🐟", label:"수산시장" },
+  { emoji:"☕", label:"카페" },
+  { emoji:"🚕", label:"택시" },
+  { emoji:"🏥", label:"병원" },
+  { emoji:"🛍️", label:"쇼핑몰" },
+  { emoji:"🏨", label:"호텔" },
+];
 
 const HINT_PHRASES = [
   { zh:"一個人", py:"Yī gè rén", kongl:"이 거 런", kr:"혼자예요",
@@ -487,13 +533,32 @@ function FlashCardInner({ card, accentColor, onResult }) {
 // ────────────────────────────────────────────────
 // 대화 모드
 // ────────────────────────────────────────────────
-function ChatMode({ msgs, setMsgs }) {
+function ChatMode({ msgs, setMsgs, scenario, setScenario }) {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [showHints, setShowHints] = useState(false);
+  const [scenarioInput, setScenarioInput] = useState("");
+  const [starting, setStarting] = useState(false);
   const bottomRef = useRef(null);
 
   useEffect(()=>{ bottomRef.current?.scrollIntoView({behavior:"smooth"}); },[msgs,loading]);
+
+  const startScenario = async (sc) => {
+    const s = (sc || scenarioInput).trim();
+    if (!s || starting) return;
+    setStarting(true);
+    try {
+      const data = await callAPI({
+        model:"claude-haiku-4-5-20251001", max_tokens:600,
+        system: makeSystemPrompt(s),
+        messages:[{role:"user", content:"지금 상황 시작해줘. 첫 인사만 짧게 해줘."}],
+      });
+      const reply = data.content?.[0]?.text || "";
+      setScenario(s);
+      setMsgs([{role:"assistant", raw:reply, id:Date.now()}]);
+      setScenarioInput("");
+    } finally { setStarting(false); }
+  };
 
   const send = async (text) => {
     const t = text||input.trim();
@@ -504,7 +569,7 @@ function ChatMode({ msgs, setMsgs }) {
     try {
       const data = await callAPI({
         model:"claude-haiku-4-5-20251001", max_tokens:1200,
-        system:SYSTEM_PROMPT,
+        system: makeSystemPrompt(scenario),
         messages:next.map(m=>({role:m.role,content:m.raw})),
       });
       const reply = data.content?.[0]?.text||"REP_ZH: 對不起\nREP_PY: Duìbuqǐ\nREP_KONGL: 뚜이부치\nREP_KR: 다시 말씀해 주세요.\nREP_WORDS: 對不起(뚜이부치)=죄송합니다";
@@ -553,8 +618,53 @@ function ChatMode({ msgs, setMsgs }) {
     );
   };
 
+  // 상황 선택 화면
+  if (!scenario) return (
+    <div style={{width:"100%",maxWidth:560,background:"white",borderRadius:20,padding:"24px",boxShadow:"0 4px 24px rgba(0,0,0,0.07)",border:"1px solid #ffe0cc"}}>
+      <div style={{fontSize:14,fontWeight:800,color:"#d4380d",marginBottom:14,fontFamily:"'Noto Sans KR',sans-serif"}}>🎭 어떤 상황을 연습할까요?</div>
+      <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:18}}>
+        {PRESET_SCENARIOS.map(s=>(
+          <button key={s.label} onClick={()=>startScenario(s.label)} disabled={starting} style={{
+            background:"#fff5f0", border:"1.5px solid #ffd0b0", borderRadius:20,
+            padding:"8px 16px", fontSize:13, color:"#d4380d", cursor:starting?"not-allowed":"pointer",
+            fontFamily:"'Noto Sans KR',sans-serif", fontWeight:700,
+            opacity: starting?0.6:1,
+          }}>{s.emoji} {s.label}</button>
+        ))}
+      </div>
+      <div style={{fontSize:12,color:"#bbb",marginBottom:8,fontFamily:"'Noto Sans KR',sans-serif"}}>또는 직접 입력</div>
+      <div style={{display:"flex",gap:8}}>
+        <input
+          value={scenarioInput}
+          onChange={e=>setScenarioInput(e.target.value)}
+          onKeyDown={e=>e.key==="Enter"&&startScenario()}
+          placeholder="예) 야시장, 약국, 지하철..."
+          disabled={starting}
+          style={{flex:1,border:"1.5px solid #ffe0cc",borderRadius:12,padding:"11px 14px",fontSize:14,outline:"none",fontFamily:"'Noto Sans KR',sans-serif",background:"#fffaf8"}}
+        />
+        <button onClick={()=>startScenario()} disabled={starting||!scenarioInput.trim()} style={{
+          background:starting||!scenarioInput.trim()?"#ffd6c0":"linear-gradient(135deg,#d4380d,#ff6b35)",
+          border:"none",borderRadius:12,padding:"0 18px",color:"white",
+          fontSize:14,fontWeight:700,cursor:starting||!scenarioInput.trim()?"not-allowed":"pointer",
+          fontFamily:"'Noto Sans KR',sans-serif",
+        }}>{starting?"⏳":"시작"}</button>
+      </div>
+    </div>
+  );
+
   return (
     <>
+      {/* 현재 상황 표시 */}
+      <div style={{width:"100%",maxWidth:560,display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8,padding:"0 4px"}}>
+        <div style={{fontSize:13,color:"#d4380d",fontWeight:700,fontFamily:"'Noto Sans KR',sans-serif"}}>
+          🎭 현재 상황: <span style={{color:"#ff6b35"}}>{scenario}</span>
+        </div>
+        <button onClick={()=>{ setScenario(""); setMsgs([]); }} style={{
+          background:"transparent",border:"1px solid #ffd0b0",borderRadius:20,
+          padding:"4px 12px",fontSize:12,color:"#d4380d",cursor:"pointer",
+          fontFamily:"'Noto Sans KR',sans-serif",fontWeight:600,
+        }}>상황 바꾸기</button>
+      </div>
       <div style={{width:"100%",maxWidth:560,background:"rgba(255,255,255,0.75)",backdropFilter:"blur(10px)",borderRadius:20,padding:"18px 14px",marginBottom:10,minHeight:380,maxHeight:490,overflowY:"auto",boxShadow:"0 4px 24px rgba(0,0,0,0.06)",border:"1px solid rgba(255,200,150,0.3)"}}>
         {msgs.map(renderMsg)}
         {loading && (
@@ -591,7 +701,7 @@ function ChatMode({ msgs, setMsgs }) {
           <input value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&send()} placeholder="한국어, 번체, 콩글리쉬 다 OK!" disabled={loading}
             style={{flex:1,border:"1.5px solid #ffe0cc",borderRadius:12,padding:"11px 14px",fontSize:15,outline:"none",fontFamily:"'Noto Sans KR',sans-serif",background:"#fffaf8"}}/>
           <button onClick={()=>send()} disabled={loading||!input.trim()} style={{background:loading||!input.trim()?"#ffd6c0":"linear-gradient(135deg,#d4380d,#ff6b35)",border:"none",borderRadius:12,width:46,height:46,cursor:loading||!input.trim()?"not-allowed":"pointer",fontSize:18,boxShadow:loading||!input.trim()?"none":"0 4px 12px rgba(212,56,13,0.3)"}}>➤</button>
-          <button onClick={()=>setMsgs([{role:"assistant",raw:INITIAL_RAW,id:0}])} title="대화 초기화" style={{background:"#f5f5f5",border:"none",borderRadius:12,width:46,height:46,cursor:"pointer",fontSize:18}}>🔄</button>
+          <button onClick={()=>startScenario(scenario)} title="대화 초기화" style={{background:"#f5f5f5",border:"none",borderRadius:12,width:46,height:46,cursor:"pointer",fontSize:18}}>🔄</button>
         </div>
         <button onClick={()=>setShowHints(v=>!v)} style={{background:showHints?"#fff5f0":"transparent",border:"1.5px dashed #ffc499",borderRadius:10,padding:"7px",cursor:"pointer",fontSize:13,color:"#d4380d",fontFamily:"'Noto Sans KR',sans-serif",fontWeight:700}}>
           {showHints?"💡 힌트 숨기기":"💡 힌트 보기"}
@@ -802,7 +912,8 @@ function TranslateMode({ results, setResults }) {
 // ────────────────────────────────────────────────
 export default function TaiwanApp() {
   const [tab, setTab] = useState("chat");
-  const [msgs, setMsgs] = useState([{role:"assistant",raw:INITIAL_RAW,id:0}]);
+  const [msgs, setMsgs] = useState([]);
+  const [scenario, setScenario] = useState("");
   const [translateResults, setTranslateResults] = useState([]);
 
   const tabs = [
@@ -842,7 +953,7 @@ export default function TaiwanApp() {
 
       {/* 탭 콘텐츠 */}
       <div style={{width:"100%",maxWidth:560}}>
-        <div style={{display: tab==="chat" ? "block" : "none"}}><ChatMode msgs={msgs} setMsgs={setMsgs}/></div>
+        <div style={{display: tab==="chat" ? "block" : "none"}}><ChatMode msgs={msgs} setMsgs={setMsgs} scenario={scenario} setScenario={setScenario}/></div>
         <div style={{display: tab==="cards" ? "block" : "none"}}><FlashCardMode/></div>
         <div style={{display: tab==="translate" ? "block" : "none"}}><TranslateMode results={translateResults} setResults={setTranslateResults}/></div>
       </div>
